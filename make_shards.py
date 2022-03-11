@@ -15,7 +15,9 @@ def make_shards(args):
     )
 
     # https://github.com/pytorch/vision/blob/a8bde78130fd8c956780d85693d0f51912013732/torchvision/datasets/folder.py#L36
-    class_list = sorted(entry.name for entry in os.scandir(args.dataset_path) if entry.is_dir())
+    class_list = sorted(
+        entry.name for entry in os.scandir(args.dataset_path)
+        if entry.is_dir())
     class_to_idx = {cls_name: i for i, cls_name in enumerate(class_list)}
 
     shard_dir_path = Path(args.shard_path)
@@ -33,7 +35,7 @@ def make_shards(args):
 
         for video_file_path in path_pbar:
 
-            video_list = []
+            jpg_byte_list = []
             cap = cv2.VideoCapture(str(video_file_path))
             if not cap.isOpened():
                 continue
@@ -43,26 +45,32 @@ def make_shards(args):
                     break
                 img = Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
                 with BytesIO() as buffer:
-                    img.save(buffer, format='JPEG')
-                    video_list.append(buffer.getvalue())
+                    img.save(buffer,
+                             format='JPEG',
+                             quality=args.quality)
+                    jpg_byte_list.append(buffer.getvalue())
 
             category_name = video_file_path.parent.name
             label = class_to_idx[category_name]
-            video_stats = {
+            fps = cap.get(cv2.CAP_PROP_FPS)
+            frame_count = cap.get(cv2.CAP_PROP_FRAME_COUNT)
+
+            video_stats_dic = {
                 'width': cap.get(cv2.CAP_PROP_FRAME_WIDTH),
                 'height': cap.get(cv2.CAP_PROP_FRAME_HEIGHT),
-                'fps': cap.get(cv2.CAP_PROP_FPS),
-                'count': cap.get(cv2.CAP_PROP_FRAME_COUNT),
+                'fps': fps,
+                'frame_count': frame_count,
+                'len': len(jpg_byte_list),  # == frame_count
+                'duraion': frame_count * fps,
                 'category': category_name,
                 'label': label,
-                'len': len(video_list),
             }
 
             sink.write({
                 '__key__': video_file_path.stem,
-                'video.pickle': video_list,
+                'video.pickle': jpg_byte_list,
                 'label.txt': str(label),
-                'stats.pickle': video_stats,
+                'stats.pickle': video_stats_dic,
             })
 
 
@@ -83,6 +91,9 @@ if __name__ == '__main__':
     parser.add_argument('-p', '--shard_prefix', action='store',
                         default='UCF101',
                         help='Prefix of shard tar files.')
+    parser.add_argument('-q', '--quality', type=int, default=95,
+                        help='Qualify factor of JPEG file. '
+                        'default to 95.')
     parser.add_argument('--max_size', type=int, default=1e10,
                         help='Max size of each shard tar file. '
                         'default to 10GB.')
