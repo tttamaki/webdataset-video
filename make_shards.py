@@ -6,6 +6,7 @@ import os
 import webdataset as wds
 import av
 import random
+import json
 
 
 def make_shards(args):
@@ -24,10 +25,10 @@ def make_shards(args):
 
     shard_dir_path = Path(args.shard_path)
     shard_dir_path.mkdir(exist_ok=True)
-    pattern = str(shard_dir_path / f'{args.shard_prefix}-%05d.tar')
+    shard_filename = str(shard_dir_path / f'{args.shard_prefix}-%05d.tar')
 
     with wds.ShardWriter(
-        pattern,
+        pattern=shard_filename,
         maxsize=args.max_size,
         maxcount=args.max_count
     ) as sink, tqdm(
@@ -47,7 +48,7 @@ def make_shards(args):
             if stream.frames > 0:
                 n_frames = stream.frames
             else:
-                # not available for some codecs
+                # stream.frames is not available for some codecs
                 n_frames = int(float(container.duration)
                                / av.time_base * stream.base_rate)
 
@@ -67,24 +68,28 @@ def make_shards(args):
 
             category_name = video_file_path.parent.name
             label = class_to_idx[category_name]
+            key_str = category_name + '/' + video_file_path.stem
 
-            video_stats_dic = {
-                'width': stream.codec_context.width,
-                'height': stream.codec_context.height,
-                'fps': stream.base_rate,
-                'n_frames': n_frames,
-                'duraion': float(container.duration) / av.time_base,
+            video_stats_json = json.dumps({
+                '__key__': key_str,
+                'video_id': video_file_path.stem,
+                'filename': video_file_path.name,
                 'category': category_name,
                 'label': label,
-            }
-
-            sink.write({
-                '__key__': video_file_path.stem,
-                'video.pickle': jpg_byte_list,
-                'timestamp.pickle': frame_sec_list,
-                'label.txt': str(label),
-                'stats.pickle': video_stats_dic,
+                'width': stream.codec_context.width,
+                'height': stream.codec_context.height,
+                'fps': float(stream.base_rate),
+                'n_frames': n_frames,
+                'duraion': float(container.duration) / av.time_base,
+                'timestamps': frame_sec_list,
             })
+
+            sample_dic = {
+                '__key__': key_str,
+                'video.pickle': jpg_byte_list,
+                'stats.json': video_stats_json,
+            }
+            sink.write(sample_dic)
 
 
 if __name__ == '__main__':

@@ -7,6 +7,7 @@ from torchvision.io import decode_jpeg
 from tqdm import tqdm
 import argparse
 import pickle
+import json
 import time
 import torch
 import webdataset as wds
@@ -30,10 +31,6 @@ def get_label(value):
     return value['label']
 
 
-def pickle_decoder(value):
-    return pickle.loads(value)
-
-
 def identity(value):
     return value
 
@@ -48,18 +45,18 @@ def wds_dataset(
     clip_sampler,
     n_frames=8,
     transform=None,
-    shuffle_buffer_size=10,
+    shuffle_buffer_size=100,
 ):
     dataset = wds.WebDataset(shards_url)
     dataset = dataset.shuffle(shuffle_buffer_size)
     dataset = dataset.decode(
-        wds.handle_extension('video.pickle', pickle_decoder),
-        # wds.handle_extension('timestamp.pickle', pickle_decoder),
-        wds.handle_extension('stats.pickle', pickle_decoder),
+        wds.handle_extension('video.pickle', lambda x: pickle.loads(x)),
+        wds.handle_extension('stats.json', lambda x: json.loads(x)),
     )
     dataset = dataset.to_tuple(
         'video.pickle',
-        'stats.pickle',
+        'stats.json',
+        'stats.json',
     )
     dataset = dataset.map_tuple(
         # 'video.pickle'
@@ -69,8 +66,10 @@ def wds_dataset(
             transform=transform,
             n_frames=n_frames,
         ),
-        # 'stats.pickle'
-        get_label,
+        # 'stats.json'
+        lambda x: x['label'],
+        # 'stats.json'
+        lambda x: x['category'],  # not used here
     )
     dataset = dataset.with_length(13000)  # dummy
 
@@ -98,34 +97,42 @@ def main(args):
 
     st = time.time()
 
-    with tqdm(enumerate(sample_loader),
-              total=len(sample_loader),
-              leave=True,
-              smoothing=0,
-              ) as pbar_batch:
+    n_epochs = 100
+    with tqdm(
+        range(n_epochs)
+    ) as pbar_epoch:
 
-        for i, batch in pbar_batch:
+        for epoch in pbar_epoch:
+            pbar_epoch.set_description("epoch: %d" % epoch)
 
-            et_data_load.update(time.time() - st)
+            with tqdm(enumerate(sample_loader),
+                      total=len(sample_loader),
+                      leave=True,
+                      smoothing=0,
+                      ) as pbar_batch:
 
-            st = time.time()
-            video = batch[0].to(device)
-            label = batch[1].to(device)
-            et_to_device.update(time.time() - st)
+                for i, batch in pbar_batch:
 
-            print('batch index', i)
-            print('video.shape', video.shape)
-            print('label.shape', label.shape)
+                    et_data_load.update(time.time() - st)
 
-            pbar_batch.set_postfix_str(
-                'data load {:6.04f} '
-                'to_device {:6.04f} '
-                .format(
-                    et_data_load.avg,
-                    et_to_device.avg,
-                ))
+                    st = time.time()
+                    video = batch[0].to(device)
+                    label = batch[1].to(device)
+                    et_to_device.update(time.time() - st)
 
-            st = time.time()
+                    print('batch index', i)
+                    print('video.shape', video.shape)
+                    print('label.shape', label.shape)
+
+                    pbar_batch.set_postfix_str(
+                        'data load {:6.04f} '
+                        'to_device {:6.04f} '
+                        .format(
+                            et_data_load.avg,
+                            et_to_device.avg,
+                        ))
+
+                    st = time.time()
 
 
 if __name__ == '__main__':
@@ -133,7 +140,6 @@ if __name__ == '__main__':
 
     parser.add_argument('-s', '--shards_url', action='store',
                         default='./shards/UCF101-{00000..00002}.tar',
-                        # default='./shards/UCF101-00000.tar',
                         help='Path to the dir to store shard tar files.')
     parser.add_argument('--shuffle', type=int, default=10,
                         help='shuffle buffer size. default 10')
