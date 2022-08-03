@@ -9,6 +9,20 @@ import random
 import json
 
 
+def bytes2kmg(b: int) -> str:
+    GB = 1024 * 1024 * 1024
+    MB = 1024 * 1024
+    kB = 1024
+    if b > GB:
+        return str(b // GB) + 'GB'
+    elif b > MB:
+        return str(b // MB) + 'MB'
+    elif b > kB:
+        return str(b // kB) + 'kB'
+    else:
+        return str(b)
+
+
 def make_shards(args):
 
     video_file_paths = list(
@@ -34,9 +48,11 @@ def make_shards(args):
     ) as sink, tqdm(
         video_file_paths,
         total=len(video_file_paths),
-    ) as path_pbar:
+    ) as pbar_path:
 
-        for video_file_path in path_pbar:
+        for video_file_path in pbar_path:
+
+            pbar_path.set_postfix_str(f"tar size: {bytes2kmg(sink.size)}")
 
             jpg_byte_list = []
             frame_sec_list = []
@@ -112,9 +128,9 @@ if __name__ == '__main__':
     parser.add_argument('-q', '--quality', type=int, default=80,
                         help='Qualify factor of JPEG file. '
                         'default to 80.')
-    parser.add_argument('--max_size', type=int, default=1e10,
+    parser.add_argument('--max_size', type=int, default=1024 * 1024 * 1024,
                         help='Max size of each shard tar file. '
-                        'default to 10GB.')
+                        'default to 1GB.')
     parser.add_argument('--max_count', type=int, default=10000,
                         help='Max number of entries in each shard tar file. '
                         'default to 10,000.')
