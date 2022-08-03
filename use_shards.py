@@ -2,7 +2,6 @@
 from average_meter import AverageMeter, accuracy
 from functools import partial
 import torch
-from torch import as_tensor
 import torch.nn as nn
 from torch.utils.data import DataLoader
 from torchvision import transforms
@@ -56,27 +55,20 @@ def transform_factory(is_train=True):
 def video_decorder(video_bytes, clip_sampler, transform, n_frames):
 
     container = av.open(io.BytesIO(video_bytes))
-    stream = container.streams.video[0]
-
-    sec = 2  # seek by specifying seconds
-    container.seek(
-        offset=sec // stream.time_base,
-        any_frame=False,
-        backward=True,
-        stream=stream)
+    video_stream_id = 0
+    # stream = container.streams.video[video_stream_id]
 
     clip = []
-    for i, frame in enumerate(container.decode(video=0)):
-        if i >= n_frames:
-            break
-        img = frame.to_ndarray(format="rgb24", width=244, height=244)
+    for frame in container.decode(video=video_stream_id):  # decode all frames
+        # img = frame.to_ndarray(format="rgb24", width=244, height=244)
+        img = frame.to_ndarray(format="rgb24")
         clip.append(img)
+    clip = np.stack(clip, 0)  # THWC
 
     frame_indices = clip_sampler(list(range(len(clip))), n_frames)
+    clip = clip[frame_indices]
 
-    clip = np.stack(clip, 0)  # THWC
-    clip = np.transpose(clip, (0, 3, 1, 2))  # TCHW
-
+    clip = np.transpose(clip, (3, 0, 1, 2))  # CTHW
     clip = torch.from_numpy(clip)
 
     if transform is not None:
@@ -132,6 +124,7 @@ def main(args):
     dataset = wds_dataset(
         shards_url=args.shards_url,
         clip_sampler=uniform_clip_sampler,
+        transform=transform_factory(),
         n_frames=args.n_frames,
     )
     sample_loader = DataLoader(
