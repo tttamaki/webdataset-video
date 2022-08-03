@@ -1,27 +1,43 @@
 
 from average_meter import AverageMeter
 from functools import partial
-from torch import as_tensor
+# from torch import as_tensor
 from torch.utils.data import DataLoader
-from torchvision.io import decode_jpeg
+# from torchvision.io import decode_jpeg
 from tqdm import tqdm
 import argparse
-import pickle
+# import pickle
 import json
 import time
 import torch
 import webdataset as wds
 import numpy as np
+import io
+import av
 
 
-def video_decorder(jpg_byte_list, clip_sampler, transform, n_frames):
+def video_decorder(video_bytes, clip_sampler, transform, n_frames):
 
-    frame_indices = clip_sampler(list(range(len(jpg_byte_list))), n_frames)
+    container = av.open(io.BytesIO(video_bytes))
+    stream = container.streams.video[0]
 
-    clip = [decode_jpeg(as_tensor(list(jpg_byte_list[i]),
-                                  dtype=torch.uint8))
-            for i in frame_indices]
-    clip = torch.stack(clip, 0)  # TCHW
+    sec = 2  # seek by specifying seconds
+    container.seek(
+        offset=sec // stream.time_base,
+        any_frame=False,
+        backward=True,
+        stream=stream)
+
+    clip = []
+    for i, frame in enumerate(container.decode(video=0)):
+        if i >= n_frames:
+            break
+        img = frame.to_ndarray(format="rgb24", width=244, height=244)
+        clip.append(img)
+    clip = np.stack(clip, 0)  # THWC
+    clip = np.transpose(clip, (0, 3, 1, 2))  # TCHW
+
+    clip = torch.from_numpy(clip)
     # clip = transform(clip)
 
     return clip
@@ -50,16 +66,15 @@ def wds_dataset(
     dataset = wds.WebDataset(shards_url)
     dataset = dataset.shuffle(shuffle_buffer_size)
     dataset = dataset.decode(
-        wds.handle_extension('video.pickle', lambda x: pickle.loads(x)),
         wds.handle_extension('stats.json', lambda x: json.loads(x)),
     )
     dataset = dataset.to_tuple(
-        'video.pickle',
+        'video.bin',
         'stats.json',
         'stats.json',
     )
     dataset = dataset.map_tuple(
-        # 'video.pickle'
+        # 'video.bin'
         partial(
             video_decorder,
             clip_sampler=clip_sampler,
@@ -139,7 +154,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
 
     parser.add_argument('-s', '--shards_url', action='store',
-                        default='./shards/UCF101-{00000..00002}.tar',
+                        default='./shards_video/UCF101-{00000..00002}.tar',
                         help='Path to the dir to store shard tar files.')
     parser.add_argument('--shuffle', type=int, default=10,
                         help='shuffle buffer size. default 10')
