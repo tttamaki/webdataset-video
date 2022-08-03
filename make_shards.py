@@ -1,4 +1,3 @@
-from io import BytesIO
 from pathlib import Path
 from tqdm import tqdm
 import argparse
@@ -34,13 +33,16 @@ def make_shards(args):
     ) as sink, tqdm(
         video_file_paths,
         total=len(video_file_paths),
-    ) as path_pbar:
+    ) as pbar_path:
 
-        for video_file_path in path_pbar:
+        for video_file_path in pbar_path:
 
-            jpg_byte_list = []
-            frame_sec_list = []
+            pbar_path.set_postfix_str(f"tar size: {sink.size}")
+
             video_stream_id = 0  # default
+
+            with open(str(video_file_path), "rb") as f:
+                movie_binary = f.read(-1)
 
             container = av.open(str(video_file_path))
             stream = container.streams.video[video_stream_id]
@@ -52,20 +54,6 @@ def make_shards(args):
                 n_frames = int(float(container.duration)
                                / av.time_base * stream.base_rate)
 
-            with tqdm(
-                container.decode(video=video_stream_id),
-                total=n_frames,
-                leave=False,
-            ) as frame_pbar:
-                for frame in frame_pbar:
-                    frame_sec_list.append(frame.time)
-                    img = frame.to_image()  # to PIL image
-                    with BytesIO() as buffer:
-                        img.save(buffer,
-                                 format='JPEG',
-                                 quality=args.quality)
-                        jpg_byte_list.append(buffer.getvalue())
-
             category_name = video_file_path.parent.name
             label = class_to_idx[category_name]
             key_str = category_name + '/' + video_file_path.stem
@@ -74,6 +62,7 @@ def make_shards(args):
                 '__key__': key_str,
                 'video_id': video_file_path.stem,
                 'filename': video_file_path.name,
+                'suffix': video_file_path.suffix[1:],  # remove "." from ".avi"
                 'category': category_name,
                 'label': label,
                 'width': stream.codec_context.width,
@@ -81,12 +70,11 @@ def make_shards(args):
                 'fps': float(stream.base_rate),
                 'n_frames': n_frames,
                 'duraion': float(container.duration) / av.time_base,
-                'timestamps': frame_sec_list,
             })
 
             sample_dic = {
                 '__key__': key_str,
-                'video.pickle': jpg_byte_list,
+                'video.bin': movie_binary,
                 'stats.json': video_stats_json,
             }
             sink.write(sample_dic)
@@ -104,7 +92,7 @@ if __name__ == '__main__':
                         help='Extension of video files. mp4 or avi. '
                         'default to avi.')
     parser.add_argument('-s', '--shard_path', action='store',
-                        default='./shards/',
+                        default='./shards_video/',
                         help='Path to the dir to store shard tar files.')
     parser.add_argument('-p', '--shard_prefix', action='store',
                         default='UCF101',
@@ -115,7 +103,7 @@ if __name__ == '__main__':
     parser.add_argument('--max_size', type=int, default=1e10,
                         help='Max size of each shard tar file. '
                         'default to 10GB.')
-    parser.add_argument('--max_count', type=int, default=10000,
+    parser.add_argument('--max_count', type=int, default=10,
                         help='Max number of entries in each shard tar file. '
                         'default to 10,000.')
 
